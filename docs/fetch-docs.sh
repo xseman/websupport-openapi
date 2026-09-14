@@ -1,17 +1,27 @@
 #!/bin/bash
 
-wget -q \
-	--show-progress \
-	--timestamping \
-	--adjust-extension \
-	-i downloads.txt
+# Mirrors the official documentation into this folder:
+#   - v1 pages (docs/v1.*) and the v2 intro page, converted from HTML to markdown
+#   - the official v2 OpenAPI file (v2.openapi.json), formatted with jq (4-space indent)
 
-find . -name "v1.*.html" -print0 | while IFS= read -r -d '' file; do
-	pandoc \
-		"$file" \
-		-o "${file%.html}.md" \
+set -e
+cd "$(dirname "$0")"
+
+while read -r url; do
+	[ -z "$url" ] && continue
+	case "$url" in
+		*/v2/docs/*) name="v2.$(basename "$url")" ;;
+		*) name="$(basename "$url")" ;;
+	esac
+	wget -q --show-progress -O "$name.html" "$url"
+	pandoc "$name.html" -o "$name.md" \
 		--from html \
 		--to markdown \
 		--wrap=none \
-		--strip-comments && rm "${file}"
-done
+		--strip-comments
+	rm "$name.html"
+done < downloads.txt
+
+wget -q --show-progress -O v2.openapi.raw.json https://rest.websupport.sk/v2/docs/openapi.json
+jq --indent 4 . v2.openapi.raw.json > v2.openapi.json
+rm v2.openapi.raw.json

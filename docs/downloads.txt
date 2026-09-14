@@ -5,3 +5,4 @@ https://rest.websupport.sk/docs/v1.order
 https://rest.websupport.sk/docs/v1.zone
 https://rest.websupport.sk/docs/v1.hosting
 https://rest.websupport.sk/docs/v1.vps
+https://rest.websupport.sk/v2/docs/intro

@@ -1,0 +1,1059 @@
+openapi: 3.0.3
+
+info:
+    title: Websupport API v2
+    version: 2.0.0
+    description: |
+        Websupport REST API v2. At the moment v2 covers only authentication verification, DNS zone
+        and record management, dynamic DNS, assigning a domain to a hosting and FTP accounts.
+        Everything else (users, billing and domain profiles, services, invoices, ordering, payments,
+        hosting details, databases, mailboxes, shell consoles, VPS) is still only available in
+        [API v1](./openapi.yaml). See the README for a v1 / v2 comparison.
+
+        This file is a cleaned copy of the official machine-readable specification published at
+        `https://rest.websupport.sk/v2/docs/openapi.json` (mirrored verbatim in `docs/v2.openapi.json`).
+        Changes against the official file: `servers`, global `security`, the `X-Date` header parameter,
+        readable `operationId`s (the official ids are kept in `x-original-operationId`), tag and
+        parameter descriptions, `404` bodies, notes on inconsistencies in the official file, and the
+        unused `InvalidData` (400) component was dropped because no operation references it.
+
+        ## Authentication
+
+        HTTP Basic authentication where the username is the API key and the password is a request
+        signature that changes with every request. The signature is a hex-encoded HMAC-SHA1 hash of the
+        canonical request `{HTTP method} {complete request path} {unix timestamp}`, where the path includes
+        the query string if any (e.g. `GET /v2/some/url?attributes=123&some=aaa 1548240417`), calculated
+        with the API secret.
+
+        Unlike v1, the time used for the signature is sent in the **`X-Date`** header (ISO 8601 basic
+        format in GMT, e.g. `20230101T000000Z`; the official Swagger UI sends the extended format).
+
+        ## Request and response format
+
+        JSON in both directions (`Content-Type: application/json`, `Accept: application/json`), UTF-8.
+
+        Errors use an RFC 7807 style body `{"type": "/errors/...", "status": 4xx, "title": "..."}`;
+        validation errors are `422` with a `violations` list (the intro page still shows the v1 style
+        `{"code": 400, "message": "..."}` for messages above 400).
+
+        ## Language
+
+        Validation messages can be localised with the `Accept-Language` header (`en_us`, `sk`, `cs_cz`, `hu`).
+    contact:
+        email: helpdesk@websupport.sk
+    license:
+        name: Apache-2.0
+        url: https://www.apache.org/licenses/LICENSE-2.0
+
+externalDocs:
+    description: Official Websupport REST API v2 documentation (Swagger UI)
+    url: https://rest.websupport.sk/v2/docs
+
+servers:
+    - url: https://rest.websupport.sk
+      description: Paths already contain the `/v2` prefix (and `/nic/update` has none).
+
+security:
+    - basicAuth: []
+
+tags:
+    - name: AUTH
+      description: Verification of API credentials.
+    - name: DNS
+      description: DNS zone detail, DNS records and dynamic DNS.
+      externalDocs:
+          url: https://rest.websupport.sk/v2/docs#/DNS
+    - name: HOSTING
+      description: Assigning domains to a hosting.
+      externalDocs:
+          url: https://rest.websupport.sk/v2/docs#/HOSTING
+    - name: FTP_ACCOUNT
+      description: FTP accounts of a hosting.
+      externalDocs:
+          url: https://rest.websupport.sk/v2/docs#/FTP_ACCOUNT
+
+paths:
+    /v2/check:
+        get:
+            operationId: verifyAuth
+            x-original-operationId: rest.v2.check
+            summary: Auth verify
+            description: Verifies the API key and signature.
+            tags:
+                - AUTH
+            parameters:
+                - $ref: "#/components/parameters/XDateHeader"
+                - $ref: "#/components/parameters/AcceptLanguage"
+            responses:
+                "200":
+                    description: Verify
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/Verify"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "403":
+                    $ref: "#/components/responses/Forbidden"
+
+    /v2/service/{service}/dns/zone:
+        get:
+            operationId: getDnsZone
+            x-original-operationId: rest.v2.dns.zone
+            summary: DNS zone detail
+            tags:
+                - DNS
+            parameters:
+                - $ref: "#/components/parameters/Service"
+                - $ref: "#/components/parameters/XDateHeader"
+                - $ref: "#/components/parameters/AcceptLanguage"
+            responses:
+                "200":
+                    description: DNS zone detail
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/DnsZone"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "403":
+                    $ref: "#/components/responses/Forbidden"
+                "404":
+                    description: Zone not found
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/NotFound"
+    /v2/service/{service}/dns/record:
+        get:
+            operationId: listDnsRecords
+            x-original-operationId: rest.v2.dns.record
+            summary: Paginated list of DNS records
+            description: "Note: in order to test the endpoint in the official Swagger UI, you need to change the default filter values."
+            tags:
+                - DNS
+            parameters:
+                - $ref: "#/components/parameters/Service"
+                - $ref: "#/components/parameters/Page"
+                - $ref: "#/components/parameters/RowsPerPage"
+                - $ref: "#/components/parameters/Descending"
+                - $ref: "#/components/parameters/SortBy"
+                - name: filters
+                  in: query
+                  required: false
+                  style: deepObject
+                  explode: true
+                  description: Filter records by field, e.g. `filters[type][]=A&filters[name]=www`.
+                  schema:
+                      $ref: "#/components/schemas/DnsRecordFilters"
+                - $ref: "#/components/parameters/XDateHeader"
+                - $ref: "#/components/parameters/AcceptLanguage"
+            responses:
+                "200":
+                    description: Paginated list of DNS records.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/DnsRecordPaginatedCollection"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "403":
+                    $ref: "#/components/responses/Forbidden"
+                "422":
+                    $ref: "#/components/responses/UnprocessableEntity"
+        post:
+            operationId: createDnsRecord
+            x-original-operationId: rest.v2.dns.create-record
+            summary: Create a new DNS record
+            description: |
+                All changes are immediately reflected to the Websupport DNS servers, but records can be
+                cached for a few minutes in your computer or in other DNS servers.
+
+                The created record is not returned (`204`); list the records to obtain its ID.
+            tags:
+                - DNS
+            parameters:
+                - $ref: "#/components/parameters/Service"
+                - $ref: "#/components/parameters/XDateHeader"
+                - $ref: "#/components/parameters/AcceptLanguage"
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: "#/components/schemas/CreateRecordRequest"
+            responses:
+                "204":
+                    description: Operation Successful
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "403":
+                    $ref: "#/components/responses/Forbidden"
+                "422":
+                    $ref: "#/components/responses/UnprocessableEntity"
+                "500":
+                    description: Failed to create dns record
+    /v2/service/{service}/dns/record/{record}:
+        put:
+            operationId: updateDnsRecord
+            x-original-operationId: rest.v2.dns.update-record
+            summary: Update a DNS record
+            description: |
+                All changes are immediately reflected to the Websupport DNS servers, but records can be
+                cached for a few minutes in your computer or in other DNS servers.
+            tags:
+                - DNS
+            parameters:
+                - $ref: "#/components/parameters/Service"
+                - $ref: "#/components/parameters/Record"
+                - $ref: "#/components/parameters/XDateHeader"
+                - $ref: "#/components/parameters/AcceptLanguage"
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: "#/components/schemas/UpdateRecordRequest"
+            responses:
+                "204":
+                    description: Operation Successful
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "403":
+                    $ref: "#/components/responses/Forbidden"
+                "422":
+                    $ref: "#/components/responses/UnprocessableEntity"
+                "500":
+                    description: Failed to update dns record
+        delete:
+            operationId: deleteDnsRecord
+            x-original-operationId: rest.v2.dns.delete-record
+            summary: Deletes a DNS record
+            description: |
+                All changes are immediately reflected to the Websupport DNS servers, but records can be
+                cached for a few minutes in your computer or in other DNS servers.
+            tags:
+                - DNS
+            parameters:
+                - $ref: "#/components/parameters/Service"
+                - $ref: "#/components/parameters/Record"
+                - $ref: "#/components/parameters/XDateHeader"
+                - $ref: "#/components/parameters/AcceptLanguage"
+            responses:
+                "204":
+                    description: Operation Successful
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "403":
+                    $ref: "#/components/responses/Forbidden"
+                "500":
+                    description: Failed to delete dns record
+    /nic/update:
+        get:
+            operationId: updateDynDnsRecord
+            x-original-operationId: dyndns
+            summary: DynRecord update
+            description: |
+                Dynamic DNS update endpoint (DynDNS style, no `/v2` prefix). The official specification
+                documents no query parameters; the request/response contract beyond the status codes is
+                not documented.
+            tags:
+                - DNS
+            parameters:
+                - $ref: "#/components/parameters/XDateHeader"
+                - $ref: "#/components/parameters/AcceptLanguage"
+            responses:
+                "200":
+                    description: Operation Successful
+                    content:
+                        text/html:
+                            schema:
+                                type: string
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "403":
+                    $ref: "#/components/responses/Forbidden"
+                "422":
+                    $ref: "#/components/responses/UnprocessableEntity"
+
+    /v2/service/{service}/assign-domain:
+        post:
+            operationId: assignDomainToHosting
+            x-original-operationId: rest.v2.hosting.assign-domain
+            summary: Assign domain to hosting
+            tags:
+                - HOSTING
+            parameters:
+                - $ref: "#/components/parameters/Service"
+                - $ref: "#/components/parameters/XDateHeader"
+                - $ref: "#/components/parameters/AcceptLanguage"
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: "#/components/schemas/AssignDomainRequest"
+            responses:
+                "200":
+                    description: Domain assigned to hosting
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/AssignDomainResponse"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "403":
+                    $ref: "#/components/responses/Forbidden"
+                "422":
+                    $ref: "#/components/responses/UnprocessableEntity"
+
+    /v2/service/{service}/ftp-account:
+        get:
+            operationId: listFtpAccounts
+            x-original-operationId: rest.v2.ftp-account.index
+            summary: Paginated list of FTP accounts
+            tags:
+                - FTP_ACCOUNT
+            parameters:
+                - $ref: "#/components/parameters/Service"
+                - $ref: "#/components/parameters/Page"
+                - $ref: "#/components/parameters/RowsPerPage"
+                - $ref: "#/components/parameters/Descending"
+                - $ref: "#/components/parameters/SortBy"
+                - $ref: "#/components/parameters/XDateHeader"
+                - $ref: "#/components/parameters/AcceptLanguage"
+            responses:
+                "200":
+                    description: Paginated list of FTP accounts.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/FtpAccountPaginatedCollection"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "403":
+                    $ref: "#/components/responses/Forbidden"
+                "422":
+                    $ref: "#/components/responses/UnprocessableEntity"
+        post:
+            operationId: createFtpAccount
+            x-original-operationId: rest.v2.ftp-account.store
+            summary: Create a new FTP record
+            description: The created account is not returned (`204`); list the accounts to obtain its ID.
+            tags:
+                - FTP_ACCOUNT
+            parameters:
+                - $ref: "#/components/parameters/Service"
+                - $ref: "#/components/parameters/XDateHeader"
+                - $ref: "#/components/parameters/AcceptLanguage"
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: "#/components/schemas/CreateFtpAccountRequest"
+            responses:
+                "204":
+                    description: Ftp account successfully created
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "403":
+                    $ref: "#/components/responses/Forbidden"
+                "422":
+                    $ref: "#/components/responses/UnprocessableEntity"
+                "500":
+                    description: Failed to create Ftp account
+    /v2/service/{service}/ftp-account/{ftpAccount}:
+        get:
+            operationId: getFtpAccount
+            x-original-operationId: rest.v2.ftp-account.show
+            summary: Show single FTP account
+            tags:
+                - FTP_ACCOUNT
+            parameters:
+                - $ref: "#/components/parameters/Service"
+                - $ref: "#/components/parameters/FtpAccount"
+                - $ref: "#/components/parameters/XDateHeader"
+                - $ref: "#/components/parameters/AcceptLanguage"
+            responses:
+                "200":
+                    description: Details of specific FTP account.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/FtpAccountDetail"
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "403":
+                    $ref: "#/components/responses/Forbidden"
+                "404":
+                    description: FTP account not found.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/NotFound"
+        put:
+            operationId: updateFtpAccount
+            x-original-operationId: rest.v2.ftp-account.update
+            summary: Update an existing FTP record
+            tags:
+                - FTP_ACCOUNT
+            parameters:
+                - $ref: "#/components/parameters/Service"
+                - $ref: "#/components/parameters/FtpAccount"
+                - $ref: "#/components/parameters/XDateHeader"
+                - $ref: "#/components/parameters/AcceptLanguage"
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: "#/components/schemas/UpdateFtpAccountRequest"
+            responses:
+                "204":
+                    description: Ftp account successfully updated
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "403":
+                    $ref: "#/components/responses/Forbidden"
+                "422":
+                    $ref: "#/components/responses/UnprocessableEntity"
+                "500":
+                    description: Failed to update Ftp account
+        delete:
+            operationId: deleteFtpAccount
+            x-original-operationId: rest.v2.ftp-account.destroy
+            summary: Delete an existing FTP record
+            tags:
+                - FTP_ACCOUNT
+            parameters:
+                - $ref: "#/components/parameters/Service"
+                - $ref: "#/components/parameters/FtpAccount"
+                - $ref: "#/components/parameters/XDateHeader"
+                - $ref: "#/components/parameters/AcceptLanguage"
+            responses:
+                "204":
+                    description: Ftp account deleted successfully
+                "401":
+                    $ref: "#/components/responses/Unauthorized"
+                "403":
+                    $ref: "#/components/responses/Forbidden"
+                "500":
+                    description: Failed to delete Ftp account
+
+components:
+    securitySchemes:
+        basicAuth:
+            type: http
+            scheme: basic
+            description: |
+                See the [documentation](https://rest.websupport.sk/v2/docs/intro).
+
+                - **username**: API key
+                - **password**: request signature, a hex-encoded HMAC-SHA1 hash of the canonical request
+                  `{HTTP method} {complete request path} {unix timestamp}` (query string included)
+                  calculated with the API secret. The same timestamp must be sent in the `X-Date` header.
+
+    parameters:
+        XDateHeader:
+            name: X-Date
+            in: header
+            required: true
+            description: |
+                Time used for the request signature, in the ISO 8601 basic format in the GMT timezone
+                (e.g. `20230101T000000Z`). The official Swagger UI and the Python/PowerShell examples send
+                the extended format (`2023-01-01T00:00:00Z`) instead.
+            schema:
+                type: string
+            example: 20230101T000000Z
+        AcceptLanguage:
+            name: Accept-Language
+            in: header
+            required: false
+            description: Language of validation messages.
+            schema:
+                type: string
+                enum:
+                    - en_us
+                    - sk
+                    - cs_cz
+                    - hu
+        Service:
+            name: service
+            in: path
+            required: true
+            description: |
+                Service identifier of the DNS zone or hosting. The official documentation does not describe
+                the format; the numeric service ID (v1 `GET /user/{userId}/service`) is assumed.
+            schema:
+                type: string
+        Record:
+            name: record
+            in: path
+            required: true
+            description: DNS record ID (numerical value).
+            schema:
+                type: string
+        FtpAccount:
+            name: ftpAccount
+            in: path
+            required: true
+            description: FTP account ID.
+            schema:
+                type: string
+        Page:
+            name: page
+            in: query
+            required: false
+            description: Page number.
+            schema:
+                type: integer
+                nullable: true
+        RowsPerPage:
+            name: rowsPerPage
+            in: query
+            required: false
+            description: Number of rows per page.
+            schema:
+                type: integer
+                nullable: true
+        Descending:
+            name: descending
+            in: query
+            required: false
+            description: Sort in descending order.
+            schema:
+                type: boolean
+                nullable: true
+        SortBy:
+            name: sortBy
+            in: query
+            required: false
+            description: Field to sort by.
+            schema:
+                type: string
+                nullable: true
+
+    responses:
+        Unauthorized:
+            description: Unauthorized
+            content:
+                application/json:
+                    schema:
+                        $ref: "#/components/schemas/Unauthorized"
+        Forbidden:
+            description: Forbidden
+            content:
+                application/json:
+                    schema:
+                        $ref: "#/components/schemas/Forbidden"
+        UnprocessableEntity:
+            description: Unprocessable Entity
+            content:
+                application/json:
+                    schema:
+                        $ref: "#/components/schemas/UnprocessableEntity"
+
+    schemas:
+        # ---------------------------------------------------------------
+        # Errors (RFC 7807 style)
+        # ---------------------------------------------------------------
+        ProblemDetails:
+            type: object
+            properties:
+                type:
+                    type: string
+                    description: Error type URI reference
+                    example: /errors/httpException
+                status:
+                    type: integer
+                    description: HTTP status code
+                title:
+                    type: string
+                    description: Human readable error title
+        Unauthorized:
+            allOf:
+                - $ref: "#/components/schemas/ProblemDetails"
+            example:
+                type: /errors/unauthenticated
+                status: 401
+                title: Unauthenticated
+        Forbidden:
+            allOf:
+                - $ref: "#/components/schemas/ProblemDetails"
+            example:
+                type: /errors/httpException
+                status: 403
+                title: This action is unauthorized.
+        NotFound:
+            allOf:
+                - $ref: "#/components/schemas/ProblemDetails"
+            example:
+                type: /errors/httpException
+                status: 404
+                title: Not found.
+        UnprocessableEntity:
+            allOf:
+                - $ref: "#/components/schemas/ProblemDetails"
+                - type: object
+                  properties:
+                      violations:
+                          type: array
+                          items:
+                              type: object
+                              properties:
+                                  propertyPath:
+                                      type: string
+                                      description: Path of the invalid property
+                                  errors:
+                                      type: array
+                                      items:
+                                          type: object
+                      data:
+                          type: object
+                          description: The submitted data
+            example:
+                type: /errors/validation
+                status: 422
+                title: The given data was invalid.
+                violations:
+                    - propertyPath: name
+                      errors: []
+                data:
+                    name: Merlin
+
+        # ---------------------------------------------------------------
+        # AUTH
+        # ---------------------------------------------------------------
+        Verify:
+            type: object
+            required:
+                - verified
+            properties:
+                verified:
+                    type: boolean
+
+        # ---------------------------------------------------------------
+        # DNS
+        # ---------------------------------------------------------------
+        DnsZone:
+            type: object
+            properties:
+                name:
+                    type: string
+                    example: example.com
+                lastCheck:
+                    type: string
+                    format: date-time
+                    example: "2026-01-01T13:00:00.000Z"
+                dnssecSigning:
+                    type: string
+                    enum:
+                        - active
+                        - inactive
+                        - disabled
+                    example: active
+        DnsRecordType:
+            type: string
+            description: DNS record type
+            enum:
+                - A
+                - AAAA
+                - ANAME
+                - CAA
+                - CNAME
+                - DNSSEC
+                - MX
+                - NS
+                - SRV
+                - TXT
+                - CERT
+                - LOC
+                - SSHFP
+                - TLSA
+                - DS
+        DnsRecord:
+            type: object
+            required:
+                - id
+                - name
+                - content
+                - ttl
+                - priority
+                - port
+                - weight
+                - type
+            properties:
+                id:
+                    type: integer
+                    nullable: true
+                name:
+                    type: string
+                content:
+                    type: string
+                ttl:
+                    type: integer
+                priority:
+                    type: integer
+                    nullable: true
+                    description: Priority (MX, SRV); called `prio` in v1
+                port:
+                    type: integer
+                    nullable: true
+                    description: Port (SRV)
+                weight:
+                    type: integer
+                    nullable: true
+                    description: Weight (SRV)
+                type:
+                    $ref: "#/components/schemas/DnsRecordType"
+        DnsRecordFilters:
+            type: object
+            description: |
+                Filters of the DNS record list. The official filter enum omits `DNSSEC` and `NS`, which
+                can be created but apparently not filtered; `flags` and `tag` relate to CAA records.
+            properties:
+                name:
+                    type: string
+                    nullable: true
+                type:
+                    type: array
+                    nullable: true
+                    items:
+                        type: string
+                        enum:
+                            - A
+                            - AAAA
+                            - ANAME
+                            - CAA
+                            - CNAME
+                            - MX
+                            - SRV
+                            - TXT
+                            - CERT
+                            - LOC
+                            - SSHFP
+                            - TLSA
+                            - DS
+                content:
+                    type: string
+                    nullable: true
+                ttl:
+                    type: integer
+                    nullable: true
+                note:
+                    type: string
+                    nullable: true
+                priority:
+                    type: integer
+                    nullable: true
+                port:
+                    type: integer
+                    nullable: true
+                weight:
+                    type: integer
+                    nullable: true
+                flags:
+                    type: integer
+                    nullable: true
+                tag:
+                    type: array
+                    nullable: true
+                    items:
+                        type: string
+                        enum:
+                            - issue
+                            - issuewild
+                            - iodef
+        DnsRecordPaginatedCollection:
+            allOf:
+                - $ref: "#/components/schemas/Pagination"
+                - type: object
+                  required:
+                      - data
+                  properties:
+                      data:
+                          type: array
+                          items:
+                              $ref: "#/components/schemas/DnsRecord"
+        CreateRecordRequest:
+            type: object
+            description: The official specification marks no property as required; `type`, `name` and `content` are needed in practice.
+            properties:
+                type:
+                    $ref: "#/components/schemas/DnsRecordType"
+                name:
+                    type: string
+                    description: Subdomain name, or `@` for the zone itself
+                content:
+                    type: string
+                    nullable: true
+                ttl:
+                    type: integer
+                    description: Time to live in seconds
+                priority:
+                    type: integer
+                    nullable: true
+                    description: Priority (MX, SRV)
+                port:
+                    type: integer
+                    nullable: true
+                    description: Port (SRV)
+                weight:
+                    type: integer
+                    nullable: true
+                    description: Weight (SRV)
+        UpdateRecordRequest:
+            type: object
+            description: The record `type` cannot be changed.
+            properties:
+                name:
+                    type: string
+                content:
+                    type: string
+                    nullable: true
+                ttl:
+                    type: integer
+                priority:
+                    type: integer
+                    nullable: true
+                port:
+                    type: integer
+                    nullable: true
+                weight:
+                    type: integer
+                    nullable: true
+
+        # ---------------------------------------------------------------
+        # HOSTING
+        # ---------------------------------------------------------------
+        AssignDomainRequest:
+            type: object
+            properties:
+                domain:
+                    type: string
+                    description: Domain name to assign to the hosting
+                wordpressInstallationData:
+                    type: array
+                    nullable: true
+                    description: WordPress installation data (element shape not documented)
+                    items:
+                        type: string
+                type:
+                    type: string
+                    nullable: true
+                    description: Assignment type (values not documented)
+        AssignDomainResponse:
+            type: object
+            required:
+                - assignmentId
+            properties:
+                assignmentId:
+                    type: integer
+
+        # ---------------------------------------------------------------
+        # FTP_ACCOUNT
+        # ---------------------------------------------------------------
+        FtpAccount:
+            type: object
+            description: |
+                FTP account as returned in the paginated list. Note: the official specification types
+                `createTime` as a string with the non-standard format `local-date-time` here, but as an
+                int64 unix timestamp in the single-account detail.
+            required:
+                - id
+                - createTime
+                - login
+                - dir
+                - disabled
+                - ftpEnabled
+                - sshEnabled
+                - countryCheck
+                - ipCheck
+                - countries
+                - ips
+                - note
+            properties:
+                id:
+                    type: integer
+                    nullable: true
+                createTime:
+                    type: string
+                    nullable: true
+                    description: Creation time (`local-date-time` in the official file)
+                login:
+                    type: string
+                    nullable: true
+                dir:
+                    type: string
+                    nullable: true
+                disabled:
+                    type: boolean
+                    nullable: true
+                ftpEnabled:
+                    type: boolean
+                    nullable: true
+                sshEnabled:
+                    type: boolean
+                    nullable: true
+                countryCheck:
+                    type: boolean
+                    nullable: true
+                ipCheck:
+                    type: boolean
+                    nullable: true
+                countries:
+                    type: array
+                    nullable: true
+                    items:
+                        type: string
+                ips:
+                    type: array
+                    nullable: true
+                    items:
+                        type: string
+                note:
+                    type: string
+                    nullable: true
+        FtpAccountDetail:
+            type: object
+            properties:
+                id:
+                    type: integer
+                createTime:
+                    type: integer
+                    format: int64
+                    description: Unix timestamp of creation
+                    example: 1707755612
+                login:
+                    type: string
+                dir:
+                    type: string
+                disabled:
+                    type: boolean
+                ftpEnabled:
+                    type: boolean
+                sshEnabled:
+                    type: boolean
+                countryCheck:
+                    type: boolean
+                ipCheck:
+                    type: boolean
+                countries:
+                    type: array
+                    description: Array of 2-character country codes (ISO 3166-1 alpha-2)
+                    items:
+                        type: string
+                        pattern: "^[A-Z]{2}$"
+                ips:
+                    type: array
+                    description: Array of valid IPv4 addresses
+                    items:
+                        type: string
+                        format: ipv4
+                note:
+                    type: string
+                    nullable: true
+        FtpAccountPaginatedCollection:
+            allOf:
+                - $ref: "#/components/schemas/Pagination"
+                - type: object
+                  required:
+                      - data
+                  properties:
+                      data:
+                          type: array
+                          items:
+                              $ref: "#/components/schemas/FtpAccount"
+        FtpAccountWriteFields:
+            type: object
+            properties:
+                dir:
+                    type: string
+                    nullable: true
+                    description: Accessible directory
+                disabled:
+                    type: boolean
+                    nullable: true
+                    description: Deactivate account
+                ftpEnabled:
+                    type: boolean
+                    nullable: true
+                    description: Enable FTP
+                sshEnabled:
+                    type: boolean
+                    nullable: true
+                    description: Enable SFTP
+                countryCheck:
+                    type: boolean
+                    nullable: true
+                    description: Enable access only from selected countries
+                ipCheck:
+                    type: boolean
+                    nullable: true
+                    description: Enable access only from selected IP addresses
+                countries:
+                    type: array
+                    nullable: true
+                    description: Allowed countries as ISO 3166-1 alpha-2 codes
+                    items:
+                        type: string
+                ips:
+                    type: array
+                    nullable: true
+                    description: Allowed IP addresses
+                    items:
+                        type: string
+                note:
+                    type: string
+                    nullable: true
+        CreateFtpAccountRequest:
+            allOf:
+                - type: object
+                  description: The official specification marks no property as required; `login` and `password` are needed in practice.
+                  properties:
+                      login:
+                          type: string
+                          description: FTP login
+                      password:
+                          type: string
+                          format: password
+                          description: FTP password
+                      dir:
+                          type: string
+                          description: Accessible directory
+                - $ref: "#/components/schemas/FtpAccountWriteFields"
+        UpdateFtpAccountRequest:
+            allOf:
+                - type: object
+                  properties:
+                      login:
+                          type: string
+                          nullable: true
+                          description: FTP login
+                      password:
+                          type: string
+                          nullable: true
+                          format: password
+                          description: FTP password
+                - $ref: "#/components/schemas/FtpAccountWriteFields"
+
+        # ---------------------------------------------------------------
+        # Common
+        # ---------------------------------------------------------------
+        Pagination:
+            type: object
+            required:
+                - currentPage
+                - totalPages
+                - totalRecords
+                - rowsPerPage
+            properties:
+                currentPage:
+                    type: integer
+                rowsPerPage:
+                    type: integer
+                totalPages:
+                    type: integer
+                totalRecords:
+                    type: integer
